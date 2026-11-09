@@ -38,6 +38,34 @@ python app.py
 - TopK 结果 Lazy 截断注入系统提示词，控制 token 预算
 - 向量召回层已实现但默认关闭（实测 BM25 纯检索 99ms，质量更优）
 
+### 提示词瘦身架构（500 token 骨架 + 按需注入）
+
+系统提示词只保留「这轮对话必须知道的最短规则」，长规则全部外置到 `prompts/details/`：
+
+| 模式 | 骨架 token | 预算 | 说明 |
+|---|---|---|---|
+| 陪练 | 265 | ≤500 | 六步名 + 引导规则各一行 |
+| 速查 | 102 | ≤300 | 直接作答 + 引用用例 |
+| 出题 | 125 | ≤300 | 出题 → 等作答 → 点评 |
+| 执行 | 154 | ≤300 | 确认门 + 单人单条 |
+
+每轮注入 = 骨架 + 命中详情 + 模块索引 + TopK + **最近 5 轮历史**（更早不进上下文）。
+
+- **详情按关键词触发**：命中「六步 / 教我 / 怎么定位」才拼 `details/six_step.md`；命中模块词（配网 / OTA / 夜视 …）才拼 `details/ipc_modules.md`；`出题` 命中「评分」才拼评分维度。每轮最多 1 个，单文件 ≤500 token
+- **详情与索引互斥**：命中详情时省略模块索引（详情自带上下文，索引只为导航），保证「骨架+详情」最坏情况 ≈765 token 仍不越 800
+- **模块索引紧凑化**：21 个模块从「- 名称（N 条用例）」多行改为一行斜杠分隔，370 → 210 token
+- **验收工具**：`python tools/prompt_audit.py` 打印每轮实际 prompt 与 token 分解；`python tools/slim_verify.py` 跑骨架预算 + 历史窗口 + 真实 5 轮行为
+
+实测（system prompt 不含 TopK）：
+
+| 模式 | 瘦身前 | 瘦身后 | 降幅 |
+|---|---|---|---|
+| 陪练·常态轮 | 1247 | 476 | -61.8% |
+| 速查·常态轮 | 639 | 313 | -51.0% |
+| 出题·常态轮 | 1111 | 335 | -69.8% |
+| 执行·常态轮 | 880 | 365 | -58.5% |
+| 陪练·命中六步详情 | 1247 | 772 | -38.1% |
+
 ### 成长档案（SQLite）
 
 每轮对话自动埋点入库（`db/agent.db`）：
@@ -55,9 +83,15 @@ python app.py
 ├── config.py               # 配置加载器
 ├── config.yaml             # 本地配置（含密钥，不进 git）
 ├── requirements.txt
-├── prompts/                # 四模式系统提示词
+├── prompts/                # 四模式精简骨架（每个 ≤500 token）
+│   └── details/            #   外部详情，命中关键词才注入
+│       ├── six_step.md     #     六步法完整版 + 引导细则
+│       ├── ipc_modules.md  #     各模块 IPC 知识背景
+│       ├── practice_examples.md  # 陪练示范对话
+│       ├── quiz_rubric.md  #     出题五维评分标准
+│       └── execute_flow.md #     执行流程与比对细节
 ├── retrieval/              # 用例检索链路
-│   ├── db.py               #   建表 + 同义词表 + 模块索引
+│   ├── db.py               #   建表 + 同义词表 + 模块索引（含紧凑版）
 │   ├── tokenizer.py        #   jieba 分词 + 同义词扩展 + FTS 查询构建
 │   ├── retriever.py        #   三路召回 + 加权重排
 │   ├── injector.py         #   目录路由裁剪 + token 预算注入
@@ -65,11 +99,14 @@ python app.py
 ├── db/                     # 成长档案
 │   ├── schema.sql          #   sessions / messages / quiz_answers / week_stats
 │   └── db.py               #   连接 + 写入 + 周统计查询
-├── tools/                  # 执行框架适配层
+├── tools/                  # 执行框架适配层 + 验收脚本
 │   ├── registry.py         #   单例注册：adapter 切换 + 白名单 + 确认门 + case_mapping
 │   ├── cli_adapter.py      #   IPCPanelCheckAnchors（离线门禁）+ IPCPanelRunCase（真机）
 │   ├── base.py             #   ToolBase 抽象 + compare() 统一比对
-│   └── tool_types.py       #   ToolResult / ExpectedPlan / CompareResult
+│   ├── tool_types.py       #   ToolResult / ExpectedPlan / CompareResult
+│   ├── prompt_audit.py     #   prompt token 审计 + 瘦身前后对比
+│   ├── slim_verify.py      #   骨架预算 / 历史窗口 / 5 轮行为验收
+│   └── _baseline_prompts/  #   瘦身前提示词快照（供对比）
 └── cases/                  # 用例数据
     ├── cases_clean.json    #   清洗后的 9000+ 条用例
     ├── cases_index.md      #   用例库目录索引

@@ -43,6 +43,89 @@ KEYWORD_MODE = [
 ]
 DEFAULT_MODE = "速查模式"
 
+# ==========================================================================
+# 详情注入规则：长规则不进 system prompt，命中关键词才拼进来
+# (key, 文件, 触发关键词, 适用模式集合)
+# ==========================================================================
+ALL_MODES = set(MODE_PROMPT.keys())
+
+DETAIL_RULES: list[tuple[str, str, tuple[str, ...], set[str]]] = [
+    ("six_step", "details/six_step.md",
+     ("六步", "怎么定位", "如何定位", "教我", "定位思路", "排查思路", "定位方法", "怎么排查"),
+     {"陪练模式"}),
+    ("practice_examples", "details/practice_examples.md",
+     ("举例", "例子", "示范", "比如", "演示一下", "模拟一下"),
+     {"陪练模式"}),
+    ("quiz_rubric", "details/quiz_rubric.md",
+     ("评分", "打分", "怎么评", "维度", "评分标准", "我答完了", "看看我的答案"),
+     {"出题模式"}),
+    ("execute_flow", "details/execute_flow.md",
+     ("门禁", "确认执行", "比对", "真机", "跑一下"),
+     {"执行模式"}),
+    ("ipc_modules", "details/ipc_modules.md",
+     ("配网", "ota", "升级", "音视频", "夜视", "红外", "移动侦测", "回放",
+      "云存储", "对讲", "低功耗", "唤醒", "云台", "p2p", "码率", "花屏", "续传"),
+     {"陪练模式", "速查模式"}),
+]
+
+# 每轮最多注入 1 个详情文件，单文件不超过该 token 上限
+DETAIL_MAX_PER_TURN = 1
+DETAIL_TOKEN_CAP = 500
+
+# 命中详情时省略模块索引：详情自带上下文，索引只为导航，二者互斥
+# 这样「骨架 + 详情」最坏情况 ≈ 265 + 500 = 765 < 800
+
+# 历史窗口：只带最近 5 轮（10 条消息）
+HISTORY_ROUNDS = 5
+
+
+_tiktoken_enc = None
+_tiktoken_tried = False
+
+
+def _enc():
+    """懒加载 tiktoken 编码；没装就返回 None（只探测一次）"""
+    global _tiktoken_enc, _tiktoken_tried
+    if not _tiktoken_tried:
+        _tiktoken_tried = True
+        try:
+            import tiktoken
+            _tiktoken_enc = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            _tiktoken_enc = None
+    return _tiktoken_enc
+
+
+def estimate_tokens(text: str) -> int:
+    """token 估算：汉字 1 字 ≈ 1.5 token，非汉字 1 字符 ≈ 0.25 token。
+
+    与项目既有口径一致（500 token ≈ 300 汉字），保证瘦身前后可比。
+    装了 tiktoken 时优先用真实编码。
+    """
+    if not text:
+        return 0
+    enc = _enc()
+    if enc is not None:
+        return len(enc.encode(text))
+    zh = sum(1 for c in text if "\u4e00" <= c <= "\u9fff")
+    other = len(text) - zh
+    return int(zh * 1.5 + other * 0.25)
+
+
+def _truncate_by_tokens(text: str, cap: int) -> str:
+    """按 token 上限截断（粗略：汉字按 1.5 token/字折算）"""
+    if estimate_tokens(text) <= cap:
+        return text
+    # 逐步缩短，二分找最大可容纳长度
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if estimate_tokens(text[:mid]) <= cap - 8:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo].rstrip() + "\n…（已截断）"
+
 # 从 Agent 回复里提取引用的 case_id
 _CASE_ID_PATTERN = re.compile(r"(?:用例|case|用例ID|case_id)\s*[:：#\-]?\s*(\d{5,8})", re.IGNORECASE)
 # 从用户输入里提取 case_id（更宽松：独立的 5-8 位数字）
@@ -85,32 +168,29 @@ def _get_retrieval_conn():
 
 
 def _dynamic_case_library(user_text: str) -> str:
-    """运行时从 SQLite 动态检索相关用例 → 拼装注入 prompt 片段"""
-    try:
-        from retrieval.retriever import retrieve
-        from retrieval.injector import inject
-        from retrieval.db import format_module_index_for_prompt
-        import config as _cfg
+    """[已废弃] 旧版：模块索引 + 动态 TopK 拼成一段。
 
-        conn = _get_retrieval_conn()
-
-        # 1. 模块索引常驻（轻量，每次读一次）
-        module_index_text = format_module_index_for_prompt(conn)
-
-        # 2. 动态检索 TopK
-        result = retrieve(conn, user_text)
-        injected = inject(result["final"])
-
-        return f"{module_index_text}\n\n{injected}"
-    except Exception as e:
-        return f"(用例库动态检索失败: {e})"
+    现在拆成 build_prompt 里的两步（紧凑索引常驻 + TopK 单独注入），
+    保留空壳仅为兼容可能的外部引用。
+    """
+    info = build_prompt(_detect_mode(user_text, None), user_text)
+    return f"{info['system_base']}\n\n{info['retrieval_ctx']}"
 
 
 # 兼容旧接口：无参数时返回模块索引（给系统提示词常驻用）
+_module_index_cache: str | None = None
+
+
 def _load_cases_index() -> str:
-    """加载清洗后的用例库：模块索引常驻 + 动态检索由 _dynamic_case_library 处理"""
+    """加载模块索引（紧凑版，进程内缓存一次）
+
+    原详细版 21 个模块占 370 token，紧凑版约 180 token。
+    """
+    global _module_index_cache
+    if _module_index_cache is not None:
+        return _module_index_cache
     try:
-        from retrieval.db import format_module_index_for_prompt, init_db, seed_samples
+        from retrieval.db import format_module_index_compact, init_db, seed_samples
         import config as _cfg
         from pathlib import Path
         db_path = Path(_cfg.RETR_DB_PATH)
@@ -121,41 +201,182 @@ def _load_cases_index() -> str:
             rebuild_fts(conn)
             update_module_index(conn)
         conn = _get_retrieval_conn()
-        return format_module_index_for_prompt(conn)
+        _module_index_cache = format_module_index_compact(conn)
+        return _module_index_cache
     except Exception as e:
         return f"(用例库加载失败: {e})"
 
 
 def _load_prompt(filename: str) -> str:
+    """读骨架提示词原文（{CASE_LIBRARY} 占位由 build_prompt 填模块索引）"""
     path = os.path.join(PROMPTS_DIR, filename)
     with open(path, encoding="utf-8") as f:
-        prompt = f.read()
-    # 系统提示词里只留模块索引（常驻轻量）；动态 TopK 在 chat() 里单独注入
-    return prompt.replace("{CASE_LIBRARY}", _load_cases_index())
+        return f.read()
+
+
+def _match_details(mode: str, user_text: str) -> list[tuple[str, str]]:
+    """按关键词匹配详情文件。每轮最多注入 DETAIL_MAX_PER_TURN 个。"""
+    hits: list[tuple[str, str]] = []
+    low = (user_text or "").lower()
+    for key, rel, kws, modes in DETAIL_RULES:
+        if mode not in modes:
+            continue
+        if any(kw in low for kw in kws):
+            hits.append((key, rel))
+            if len(hits) >= DETAIL_MAX_PER_TURN:
+                break
+    return hits
+
+
+def _load_detail(rel: str, key: str) -> str:
+    """读详情文件并按 token 上限截断"""
+    path = os.path.join(PROMPTS_DIR, rel)
+    try:
+        with open(path, encoding="utf-8") as f:
+            block = f.read().strip()
+        return _truncate_by_tokens(block, DETAIL_TOKEN_CAP)
+    except Exception as e:
+        print(f"[detail warn] {key} 加载失败: {e}", file=sys.stderr)
+        return ""
+
+
+def _trim_history(history, rounds: int = HISTORY_ROUNDS) -> list[dict]:
+    """只保留最近 N 轮对话（2N 条消息），兼容 gradio dict 与 (role, content) 元组"""
+    if not history:
+        return []
+    norm: list[dict] = []
+    for item in history:
+        if isinstance(item, dict):
+            role = item.get("role")
+            content = item.get("content")
+        elif isinstance(item, (list, tuple)) and len(item) == 2:
+            role, content = item
+        else:
+            continue
+        # gradio 有时把 content 包成 [{"type":"text","text":...}]
+        if isinstance(content, list):
+            content = "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+            )
+        if role not in ("user", "assistant") or not content:
+            continue
+        norm.append({"role": role, "content": str(content)})
+    return norm[-(rounds * 2):]
+
+
+def build_prompt(mode: str, user_text: str, history=None) -> dict:
+    """组装一轮完整 prompt（不调 LLM，供 chat() 与审计工具共用）
+
+    Returns:
+        {mode, prompt_name, system_base, system_prompt, retrieval_ctx,
+         details, retrieval_info, messages, breakdown, over_budget}
+    """
+    prompt_file = MODE_PROMPT[mode]
+
+    # 1) 骨架
+    skeleton = _load_prompt(prompt_file).replace("{CASE_LIBRARY}", "").strip()
+
+    # 2) 详情注入（关键词命中才拼）
+    detail_hits = _match_details(mode, user_text)
+    detail_blocks: list[tuple[str, str]] = []
+    for key, rel in detail_hits:
+        block = _load_detail(rel, key)
+        if block:
+            detail_blocks.append((key, block))
+
+    # 3) 模块索引（紧凑版）；命中详情时省略，避免超预算
+    module_index = "" if detail_blocks else _load_cases_index()
+
+    # 4) 组装 system_base = 骨架 + 详情 + 索引（不含 TopK）
+    parts = [skeleton]
+    for key, block in detail_blocks:
+        parts.append(f"## 参考资料：{key}\n{block}")
+    if module_index:
+        parts.append(module_index)
+    system_base = "\n\n".join(p for p in parts if p)
+
+    # 5) TopK 检索上下文
+    retrieval_ctx, retrieval_info = "", None
+    try:
+        from retrieval.retriever import retrieve
+        from retrieval.injector import inject
+        conn = _get_retrieval_conn()
+        r = retrieve(conn, user_text)
+        retrieval_ctx = inject(r["final"])
+        retrieval_info = {
+            "tokens": r["tokens"],
+            "module_hits": r["module_hits"],
+            "fts_count": r["fts_count"],
+            "final_count": r["final_count"],
+        }
+    except Exception:
+        pass  # 检索失败不阻断
+
+    system_prompt = system_base
+    if retrieval_ctx:
+        system_prompt = system_base.rstrip() + "\n\n" + retrieval_ctx
+
+    # 6) 历史窗口 + 本轮输入
+    hist_msgs = _trim_history(history)
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(hist_msgs)
+    messages.append({"role": "user", "content": user_text})
+
+    t_base = estimate_tokens(system_base)
+    t_topk = estimate_tokens(retrieval_ctx)
+    t_hist = sum(estimate_tokens(m["content"]) for m in hist_msgs)
+    t_user = estimate_tokens(user_text)
+
+    return {
+        "mode": mode,
+        "prompt_name": prompt_file,
+        "system_base": system_base,
+        "system_prompt": system_prompt,
+        "retrieval_ctx": retrieval_ctx,
+        "details": [k for k, _ in detail_blocks],
+        "retrieval_info": retrieval_info,
+        "messages": messages,
+        "breakdown": {
+            "skeleton": estimate_tokens(skeleton),
+            "details": estimate_tokens("\n\n".join(b for _, b in detail_blocks)) if detail_blocks else 0,
+            "module_index": estimate_tokens(module_index),
+            "system_base": t_base,
+            "topk": t_topk,
+            "history": t_hist,
+            "user": t_user,
+            "system_total": t_base + t_topk,
+            "total_input": t_base + t_topk + t_hist + t_user,
+        },
+        # 硬性验收：不含 TopK 的 system prompt ≤ 800 token
+        "over_budget": t_base > 800,
+    }
 
 
 def chat(user_text: str, ui_mode: str | None = None, session_id: int | None = None,
-         _return_dict: bool = False) -> str | dict:
+         history=None, _return_dict: bool = False) -> str | dict:
     """入口函数
 
     Args:
         user_text: 用户输入
         ui_mode:   UI Radio 传过来的模式名
         session_id: 成长档案 session（可 None，不写库）
-        _return_dict: True 时返回 dict 含埋点（tokens / case_ids / latency）；
-                      False 时只返回 reply 字符串（兼容旧调用）
+        history:   历史消息（gradio Chatbot 的 list，或 [(role, content)]）。
+                   只取最近 5 轮（10 条）进上下文。
+        _return_dict: True 时返回 dict 含埋点（tokens / case_ids / latency /
+                      prompt_debug）；False 时只返回 reply 字符串（兼容旧调用）
 
     Returns:
         str（默认）或 dict: {reply, prompt_name, tokens_input, tokens_output,
                             tokens_total, latency_ms, case_ids_referenced,
-                            reply_type, is_success}
+                            reply_type, is_success, mode, retrieval_info,
+                            prompt_debug}
     """
     result: dict = {
         "reply": "", "prompt_name": "",
         "tokens_input": 0, "tokens_output": 0, "tokens_total": 0,
         "latency_ms": 0, "case_ids_referenced": [],
         "reply_type": "", "is_success": 0, "mode": "",
-        "retrieval_info": None,
+        "retrieval_info": None, "prompt_debug": None,
     }
 
     if not user_text or not user_text.strip():
@@ -169,39 +390,27 @@ def chat(user_text: str, ui_mode: str | None = None, session_id: int | None = No
     if mode == "执行模式":
         return _handle_execute_mode(user_text, result, session_id, _return_dict)
 
-    # 1) 加载 prompt（只有模块索引，动态 TopK 在下面注入）
+    # 1) 组装 prompt：骨架 + 命中详情 + 紧凑索引 + TopK + 最近 5 轮历史
     try:
-        prompt_file = MODE_PROMPT[mode]
-        system_prompt = _load_prompt(prompt_file)
-        result["prompt_name"] = prompt_file
+        info = build_prompt(mode, user_text, history)
     except Exception as e:
-        result["reply"] = f"[提示词加载失败] 模式={mode} 文件={prompt_file} err={e}"
+        result["reply"] = f"[提示词加载失败] 模式={mode} err={e}"
         return result if _return_dict else result["reply"]
 
-    # 2) 动态检索 TopK → 拼成检索上下文，追加到 system_prompt 末尾
-    retrieval_ctx = ""
-    try:
-        from retrieval.retriever import retrieve
-        from retrieval.injector import inject
-        conn = _get_retrieval_conn()
-        r = retrieve(conn, user_text)
-        retrieval_ctx = inject(r["final"])
-        result["retrieval_info"] = {
-            "tokens": r["tokens"],
-            "module_hits": r["module_hits"],
-            "fts_count": r["fts_count"],
-            "final_count": r["final_count"],
-        }
-    except Exception:
-        pass  # 检索失败不阻断
+    result["prompt_name"] = info["prompt_name"]
+    result["retrieval_info"] = info["retrieval_info"]
+    result["prompt_debug"] = {
+        "mode": mode,
+        "details": info["details"],
+        "breakdown": info["breakdown"],
+        "over_budget": info["over_budget"],
+        "messages": info["messages"],
+    }
 
-    if retrieval_ctx:
-        system_prompt = system_prompt.rstrip() + "\n\n" + retrieval_ctx
-
-    # 3) 调 LLM（计时 + token 估算）
+    # 2) 调 LLM（计时 + token 估算）
     t0 = time.time()
     try:
-        answer = _get_client().chat(system_prompt, user_text)
+        answer = _get_client().complete(info["messages"])
         result["is_success"] = 1
     except LLM_EXCEPTIONS as e:
         answer = classify_error(e)
@@ -211,20 +420,16 @@ def chat(user_text: str, ui_mode: str | None = None, session_id: int | None = No
     result["latency_ms"] = int((time.time() - t0) * 1000)
     result["reply"] = answer
 
-    # 4) 埋点：估算 token + 提取 case_id + 判断 reply_type
-    zh = sum(1 for c in system_prompt + user_text if '\u4e00' <= c <= '\u9fff')
-    other = sum(1 for c in system_prompt + user_text if not ('\u4e00' <= c <= '\u9fff'))
-    result["tokens_input"] = int(zh * 1.5 + other * 0.25)
-    zh2 = sum(1 for c in answer if '\u4e00' <= c <= '\u9fff')
-    other2 = sum(1 for c in answer if not ('\u4e00' <= c <= '\u9fff'))
-    result["tokens_output"] = int(zh2 * 1.5 + other2 * 0.25)
+    # 3) 埋点：按真实 messages 累计 token（含历史），输出按回复估算
+    result["tokens_input"] = sum(estimate_tokens(m["content"]) for m in info["messages"])
+    result["tokens_output"] = estimate_tokens(answer)
     result["tokens_total"] = result["tokens_input"] + result["tokens_output"]
 
     result["case_ids_referenced"] = list(set(_CASE_ID_PATTERN.findall(answer)))
 
     result["reply_type"] = _classify_reply(mode, answer)
 
-    # 5) 写成长档案（session_id 非 None 时）
+    # 4) 写成长档案（session_id 非 None 时）
     if session_id is not None:
         _archive(session_id, user_text, result)
 

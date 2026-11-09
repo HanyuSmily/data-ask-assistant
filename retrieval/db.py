@@ -413,7 +413,7 @@ def get_module_index(conn: sqlite3.Connection) -> list[dict]:
 
 
 def format_module_index_for_prompt(conn: sqlite3.Connection) -> str:
-    """输出给系统提示词常驻的模块索引文本。"""
+    """输出给系统提示词常驻的模块索引文本（详细版，保留备查）。"""
     rows = get_module_index(conn)
     if not rows:
         return ""
@@ -421,3 +421,17 @@ def format_module_index_for_prompt(conn: sqlite3.Connection) -> str:
     for r in rows:
         lines.append(f"- {r['module']}（{r['count']} 条用例）")
     return "\n".join(lines)
+
+
+def format_module_index_compact(conn: sqlite3.Connection) -> str:
+    """紧凑版模块索引：只留模块名，一行逗号分隔。
+
+    原版每条带"（N 条用例）"+ 换行，21 个模块占 370 token；
+    紧凑版约 130 字符、180 token，省一半以上。
+    用例数量对模型判断无价值（TopK 注入里已带 catalog_path）。
+    """
+    rows = get_module_index(conn)
+    if not rows:
+        return ""
+    names = " / ".join(r["module"] for r in rows)
+    return f"用例模块：{names}"

@@ -3,9 +3,27 @@
 换平台/换模型只改 config.yaml，不改这里、不改 chat_handler。"""
 from __future__ import annotations
 
+import os
+import sys
 from typing import Iterable
 
 from openai import OpenAI, APIError, RateLimitError, APITimeoutError
+
+
+def _dump_messages(messages: list[dict]) -> None:
+    """把即将发送的 messages 打到 stderr（PROMPT_LOG=1 时生效）"""
+    try:
+        print("=" * 60, file=sys.stderr)
+        for m in messages:
+            role = m.get("role", "?")
+            content = m.get("content") or ""
+            zh = sum(1 for c in content if "\u4e00" <= c <= "\u9fff")
+            est = int(zh * 1.5 + (len(content) - zh) * 0.25)
+            print(f"--- {role} ({est} tok, {len(content)} chars) ---", file=sys.stderr)
+            print(content, file=sys.stderr)
+        print("=" * 60, file=sys.stderr)
+    except Exception:
+        pass
 
 
 class LLMClient:
@@ -30,7 +48,13 @@ class LLMClient:
         return self.complete(messages)
 
     def complete(self, messages: list[dict]) -> str:
-        """底层调用：直接传 messages 列表"""
+        """底层调用：直接传 messages 列表。
+
+        设 PROMPT_LOG=1 环境变量可把实际发送的 messages 打到 stderr，
+        用于核对每轮真实 prompt 与 token 占用。
+        """
+        if os.environ.get("PROMPT_LOG"):
+            _dump_messages(messages)
         resp = self._client.chat.completions.create(
             model=self.model,
             messages=messages,

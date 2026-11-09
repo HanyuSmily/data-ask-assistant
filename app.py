@@ -367,10 +367,30 @@ def _tab_submit(user_text: str, mode: str, history: list | None, sid: int | None
     history = history or []
     if sid is None:
         sid = create_session(initial_mode=mode)
-    result = chat(user_text, mode, session_id=sid, _return_dict=True)
+    # history 只传最近 5 轮（chat_handler 内部再裁一次，双保险）
+    result = chat(user_text, mode, session_id=sid, history=history, _return_dict=True)
     history.append({"role": "user", "content": user_text})
     history.append({"role": "assistant", "content": result["reply"]})
+    _log_prompt_tokens(mode, result)
     return "", history, sid
+
+
+def _log_prompt_tokens(mode: str, result: dict):
+    """把本轮 prompt 的 token 占用打到 stderr（可用 PROMPT_LOG=0 关闭）"""
+    if os.environ.get("PROMPT_LOG", "1") == "0":
+        return
+    dbg = result.get("prompt_debug") or {}
+    bd = dbg.get("breakdown") or {}
+    if not bd:
+        return
+    flag = " ⚠️OVER" if dbg.get("over_budget") else ""
+    print(
+        f"[prompt] {mode} 骨架={bd.get('skeleton')} 详情={bd.get('details')}"
+        f" 索引={bd.get('module_index')} | system(不含TopK)={bd.get('system_base')}/800"
+        f"{flag} | TopK={bd.get('topk')} 历史={bd.get('history')}"
+        f" | 总输入={bd.get('total_input')}",
+        file=sys.stderr,
+    )
 
 
 def _tab_clear(history: list | None, sid: int | None):
