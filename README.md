@@ -2,6 +2,23 @@
 
 面向嵌入式 IPC（网络摄像头）测试同学的本地 AI 陪练工具。基于 Gradio + LLM + SQLite FTS5 用例检索，帮助测试人员**训练问题定位能力**、**速查用例**、**出题自测**，并可通过外部执行框架**真机执行用例并比对结果**。
 
+## 快速启动（每次使用前）
+
+打开 PowerShell，执行：
+
+```powershell
+cd d:\TraeCN\data-ask-assistant\data-ask-assistant
+python app.py
+```
+
+看到日志输出 `Running on local URL: http://127.0.0.1:7860` 后，浏览器访问：
+
+**http://127.0.0.1:7860**
+
+- 服务启动后终端窗口不能关闭，关闭即停止服务
+- 停止服务：终端里按 `Ctrl + C`
+- 若提示端口被占用，说明已有实例在跑，直接访问网址即可
+
 ## 核心功能
 
 ### 四种模式（页面顶部 Radio 切换）

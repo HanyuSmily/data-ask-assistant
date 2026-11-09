@@ -91,3 +91,14 @@ FROM messages m
 WHERE m.role = 'assistant'
 GROUP BY week_start, mode
 ORDER BY week_start DESC;
+
+-- saved_sessions: 用户手动收藏的对话（跨 session 持久化，刷新页不丢）
+CREATE TABLE IF NOT EXISTS saved_sessions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    mode        TEXT NOT NULL,
+    title       TEXT NOT NULL,
+    messages    TEXT NOT NULL,          -- JSON: [{"role":"user","content":"..."}, ...]
+    msg_count   INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_saved_mode_created ON saved_sessions(mode, created_at DESC);

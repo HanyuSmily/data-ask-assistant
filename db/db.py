@@ -116,3 +116,65 @@ def week_stats(week_start: str | None = None):
                 "SELECT * FROM week_stats ORDER BY week_start DESC"
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------- saved_sessions：会话收藏 ----------
+
+def save_session(mode: str, messages: list[dict]) -> int | None:
+    """把一段对话存下来。messages 是 Chatbot history 列表，每项 {role, content}。"""
+    # 过滤成纯 dict 格式（Chatbot 可能是 tuple 或 dict）
+    clean: list[dict] = []
+    for m in messages or []:
+        if isinstance(m, dict):
+            clean.append({"role": m.get("role", ""), "content": m.get("content", "")})
+        elif isinstance(m, (list, tuple)) and len(m) == 2:
+            clean.append({"role": m[0], "content": m[1]})
+
+    if not clean:
+        return None
+
+    # title = 第一条用户消息的前 20 字
+    title = "（空对话）"
+    for m in clean:
+        if m.get("role") == "user":
+            title = (m.get("content") or "").strip()[:20] or "（空对话）"
+            break
+
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO saved_sessions (mode, title, messages, msg_count, created_at)
+               VALUES (?,?,?,?,?)""",
+            (mode, title, json.dumps(clean, ensure_ascii=False), len(clean), _now_iso()),
+        )
+        return cur.lastrowid
+
+
+def list_saved_sessions(mode_filter: str | None = None) -> list[dict]:
+    """列出已保存的会话（不含 messages 全文，侧边栏够用）。"""
+    sql = "SELECT id, mode, title, msg_count, created_at FROM saved_sessions"
+    params: list = []
+    if mode_filter and mode_filter != "全部":
+        sql += " WHERE mode = ?"
+        params.append(mode_filter)
+    sql += " ORDER BY created_at DESC"
+    with get_conn() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_saved_session(saved_id: int) -> dict | None:
+    """拉一条完整的收藏（含 messages JSON）。"""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM saved_sessions WHERE id = ?", (saved_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["messages"] = json.loads(d["messages"])
+        return d
+
+
+def delete_saved_session(saved_id: int):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM saved_sessions WHERE id = ?", (saved_id,))
