@@ -1,0 +1,538 @@
+/* ===========================================================
+   测试陪练 Agent · 全新界面设计系统
+   主色：蓝紫（Indigo / Violet）  辅色：莫兰迪渐变（Morandi）
+   标签页 = 渐变胶囊按钮；背景 = 莫兰迪柔光渐变；卡片 = 玻璃拟态
+   =========================================================== */
+
+:root {
+  /* 墨色 */
+  --mv-ink:   #2E2A52;
+  --mv-ink2:  #5C5786;
+  --mv-ink3:  #8E8AB0;
+
+  /* 蓝紫主色阶 */
+  --mv-indigo: #6C63C7;
+  --mv-violet: #8B7FC7;
+  --mv-lav:    #A9A3D6;
+
+  /* 莫兰迪辅色 */
+  --mv-blue: #8FA6D8;
+  --mv-sage: #93B3AA;
+  --mv-rose: #C79AB4;
+  --mv-clay: #C89A80;
+}
+
+/* ---------- 1. 全局底色：莫兰迪渐变 + 柔光斑 ---------- */
+body,
+.gradio-container {
+  background-color: #F4F2FB !important;
+  background-image:
+    radial-gradient(1100px 620px at  6% -12%, rgba(169,163,214,.60) 0%, rgba(169,163,214,0) 62%),
+    radial-gradient(1000px 560px at 96%  -6%, rgba(143,166,216,.52) 0%, rgba(143,166,216,0) 60%),
+    radial-gradient( 920px 640px at 82% 106%, rgba(199,154,180,.45) 0%, rgba(199,154,180,0) 62%),
+    radial-gradient( 820px 520px at 14% 100%, rgba(147,179,170,.34) 0%, rgba(147,179,170,0) 60%),
+    linear-gradient(168deg, #F8F6FE 0%, #EEF1FC 46%, #F9F3F9 100%) !important;
+  background-attachment: fixed !important;
+}
+
+.gradio-container { max-width: 1400px !important; }
+/* Gradio 6 在内层容器上还留了一层宽度限制，这里一并放开 */
+.gradio-container,
+.gradio-container .main.app,
+.gradio-container .main,
+.gradio-container .contain,
+.gradio-container .wrap {
+  max-width: 1400px !important;
+  width: 100% !important;
+}
+.gradio-container .main,
+.gradio-container .contain,
+.gradio-container .wrap { background: transparent !important; }
+
+/* 弱化框架默认的灰边 */
+.gradio-container .block { border-color: rgba(140,132,200,.14) !important; }
+
+/* ---------- 2. 顶部横幅 ---------- */
+#mv-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: 26px;
+  padding: 24px 30px;
+  margin-bottom: 16px;
+  color: #fff;
+  background: linear-gradient(115deg,
+      #4B449F 0%, #5E55B8 24%, #7268CC 48%,
+      #8B84D8 70%, #A9A2DE 88%, #BDB7E6 100%);
+  box-shadow:
+    0 24px 48px -22px rgba(64, 56, 140, .68),
+    inset 0 1px 0 rgba(255, 255, 255, .38);
+}
+#mv-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(420px 250px at 14% 16%, rgba(255,255,255,.30), transparent 62%),
+    radial-gradient(390px 270px at 76% 84%, rgba(255,214,236,.26), transparent 62%),
+    radial-gradient(300px 210px at 46% 52%, rgba(255,255,255,.13), transparent 70%);
+}
+#mv-banner .mv-in {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+#mv-banner .mv-logo {
+  width: 58px; height: 58px;
+  flex: none;
+  border-radius: 18px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 27px;
+  background: linear-gradient(140deg, rgba(255,255,255,.34), rgba(255,255,255,.08));
+  border: 1px solid rgba(255,255,255,.42);
+  box-shadow: 0 8px 20px -8px rgba(0,0,0,.38);
+}
+#mv-banner .mv-txt { min-width: 0; }
+#mv-banner h1 {
+  margin: 0;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  color: #fff;
+  line-height: 1.25;
+}
+#mv-banner .mv-sub {
+  margin-top: 6px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: rgba(255,255,255,.84);
+}
+#mv-banner .mv-chips {
+  margin-left: auto;
+  display: flex;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+.mv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(255,255,255,.15);
+  border: 1px solid rgba(255,255,255,.30);
+  backdrop-filter: blur(6px);
+  white-space: nowrap;
+}
+.mv-chip .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: #9BE7C4;
+  box-shadow: 0 0 0 3px rgba(155,231,196,.30);
+}
+.mv-chip .dot.amber { background: #F3D08C; box-shadow: 0 0 0 3px rgba(243,208,140,.30); }
+
+/* ---------- 3. 模式标签页 = 莫兰迪渐变胶囊 ---------- */
+#mv-tabs { background: transparent !important; }
+#mv-tabs .tab-wrapper { background: transparent !important; }
+
+#mv-tabs .tab-container:not(.visually-hidden) {
+  display: flex !important;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 7px;
+  margin-bottom: 14px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.58);
+  border: 1px solid rgba(255,255,255,.86);
+  box-shadow: 0 12px 28px -20px rgba(66,58,140,.55);
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+#mv-tabs .tab-container:not(.visually-hidden) button {
+  flex: 0 0 auto;
+  min-width: 132px;
+  padding: 10px 16px;
+  border: none !important;
+  border-radius: 999px;
+  background: transparent !important;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--g1) !important;
+  cursor: pointer;
+  transition: transform .16s ease, box-shadow .18s ease, color .18s ease, background .22s ease;
+}
+#mv-tabs .tab-container:not(.visually-hidden) button::before {
+  content: "";
+  display: inline-block;
+  width: 9px; height: 9px;
+  margin-right: 9px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--g1, var(--mv-lav));
+  box-shadow: 0 0 0 3px rgba(255,255,255,.85);
+  transition: background .2s ease, box-shadow .2s ease;
+}
+#mv-tabs .tab-container:not(.visually-hidden) button:hover {
+  color: var(--g2) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 20px -12px var(--g1);
+}
+#mv-tabs .tab-container:not(.visually-hidden) button.selected {
+  color: #fff !important;
+  background: linear-gradient(135deg, var(--g1), var(--g2)) !important;
+  box-shadow:
+    0 14px 26px -12px var(--g1),
+    inset 0 1px 0 rgba(255,255,255,.40);
+}
+#mv-tabs .tab-container:not(.visually-hidden) button.selected::before {
+  background: rgba(255,255,255,.95);
+  box-shadow: 0 0 0 3px rgba(255,255,255,.28);
+}
+
+/* 每个模式一套莫兰迪渐变（按 tab 顺序） */
+#mv-tabs .tab-container:not(.visually-hidden) button:nth-child(1) { --g1: #7B6FD0; --g2: #9B8FE0; }
+#mv-tabs .tab-container:not(.visually-hidden) button:nth-child(2) { --g1: #5F93B5; --g2: #8FB3AE; }
+#mv-tabs .tab-container:not(.visually-hidden) button:nth-child(3) { --g1: #A97FC2; --g2: #C79AB4; }
+#mv-tabs .tab-container:not(.visually-hidden) button:nth-child(4) { --g1: #C08A6E; --g2: #C88E9E; }
+
+/* 标签内容面板 */
+#mv-tabs .tabitem { background: transparent !important; }
+#mv-tabs .tabitem > .column { gap: 12px !important; }
+
+/* ---------- 4. 聊天卡片 ---------- */
+[id^="mv-chat-"] {
+  border-radius: 22px !important;
+  border: 1px solid rgba(255,255,255,.92) !important;
+  background: linear-gradient(180deg, rgba(255,255,255,.95), rgba(251,249,255,.72)) !important;
+  box-shadow: 0 20px 44px -26px rgba(66,58,140,.55) !important;
+  overflow: hidden;
+}
+
+/* 消息行对齐 */
+[id^="mv-chat-"] .message-row.bubble { max-width: 100% !important; }
+[id^="mv-chat-"] .message-row.user-row { justify-content: flex-end !important; }
+[id^="mv-chat-"] .message-row.bot-row { justify-content: flex-start !important; }
+[id^="mv-chat-"] .user.message,
+[id^="mv-chat-"] .bot.message {
+  width: fit-content !important;
+  max-width: 88% !important;
+}
+
+/* 用户气泡：蓝紫渐变 */
+[id^="mv-chat-"] .user.message {
+  background: linear-gradient(135deg, #6C63C7, #8B7FC7) !important;
+  border: none !important;
+  border-radius: 18px 18px 6px 18px !important;
+  color: #fff !important;
+  padding: 10px 16px !important;
+  box-shadow: 0 12px 26px -13px rgba(108,99,199,.9) !important;
+}
+[id^="mv-chat-"] .user.message .prose,
+[id^="mv-chat-"] .user.message p,
+[id^="mv-chat-"] .user.message span,
+[id^="mv-chat-"] .user.message strong,
+[id^="mv-chat-"] .user.message li { color: #fff !important; }
+[id^="mv-chat-"] .user.message code {
+  background: rgba(255,255,255,.22) !important;
+  color: #fff !important;
+}
+[id^="mv-chat-"] .user.message a { color: #E9E4FF !important; }
+
+/* AI 气泡：莫兰迪白卡 */
+[id^="mv-chat-"] .bot.message {
+  background: linear-gradient(135deg, rgba(255,255,255,.98), rgba(239,237,252,.93)) !important;
+  border: 1px solid rgba(140,132,200,.20) !important;
+  border-radius: 18px 18px 18px 6px !important;
+  color: var(--mv-ink) !important;
+  padding: 12px 18px !important;
+  box-shadow: 0 10px 22px -16px rgba(66,58,140,.45);
+}
+[id^="mv-chat-"] .bot.message a { color: var(--mv-indigo) !important; }
+[id^="mv-chat-"] .bot.message code {
+  background: rgba(140,132,200,.14) !important;
+  color: #4B4580 !important;
+}
+
+/* 聊天区内的次级按钮（复制/分享） */
+[id^="mv-chat-"] button {
+  background: linear-gradient(135deg, rgba(140,132,200,.14), rgba(169,163,214,.14)) !important;
+  border-radius: 10px !important;
+  color: var(--mv-ink2) !important;
+  border: 1px solid rgba(140,132,200,.20) !important;
+}
+[id^="mv-chat-"] button:hover {
+  color: var(--mv-indigo) !important;
+  border-color: rgba(108,99,199,.42) !important;
+}
+
+/* ---------- 5. 输入区 ---------- */
+[id^="mv-input-"] textarea {
+  background: rgba(255,255,255,.92) !important;
+  border: 1px solid rgba(140,132,200,.24) !important;
+  border-radius: 16px !important;
+  padding: 12px 14px !important;
+  font-size: 14px !important;
+  line-height: 1.6 !important;
+  color: var(--mv-ink) !important;
+  box-shadow: inset 0 1px 3px rgba(80,72,150,.06);
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+[id^="mv-input-"] textarea:focus {
+  border-color: rgba(108,99,199,.55) !important;
+  box-shadow: 0 0 0 4px rgba(108,99,199,.14) !important;
+}
+[id^="mv-input-"] textarea::placeholder { color: #A9A5C4 !important; }
+[id^="mv-input-"] label.show_textbox_border {
+  border: none !important;
+  background: transparent !important;
+}
+
+/* ---------- 6. 按钮 ---------- */
+button.sm.secondary {
+  flex: 0 0 auto !important;
+  background: linear-gradient(135deg, #8C82D8, #B0A8E4) !important;
+  color: #fff !important;
+  border: none !important;
+  border-radius: 999px !important;
+  font-weight: 700 !important;
+  letter-spacing: .4px;
+  padding: 8px 16px !important;
+  align-self: center !important;
+  box-shadow: 0 12px 24px -12px rgba(108,99,199,.95) !important;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+button.sm.secondary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 30px -12px rgba(108,99,199,1) !important;
+}
+button.sm.secondary:active { transform: translateY(0); }
+
+/* 「记一下吧」= 莫兰迪粉紫；「清空本页对话」= 靛紫 */
+button.sm.secondary:nth-of-type(1):not(#mv-sidebar-btn) {
+  background: linear-gradient(135deg, #A97FC2, #C79AB4) !important;
+  box-shadow: 0 12px 24px -12px rgba(169,127,194,.95) !important;
+}
+button.sm.secondary:nth-of-type(2):not(#mv-sidebar-btn) {
+  background: linear-gradient(135deg, #6C63C7, #8B7FC7) !important;
+}
+
+/* 顶部「看看回忆」按钮 */
+#mv-sidebar-btn {
+  background: linear-gradient(135deg, #C08A6E, #C88E9E) !important;
+  box-shadow: 0 12px 24px -12px rgba(200,142,158,.95) !important;
+  white-space: nowrap;
+}
+
+/* 模式提示小胶囊 */
+.mv-hint {
+  display: inline-block;
+  padding: 5px 13px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mv-ink2);
+  background: rgba(255,255,255,.55);
+  border: 1px solid rgba(140,132,200,.16);
+}
+
+/* ---------- 6b. 「看看回忆」滑出抽屉 + 只读查看器（fixed 浮层，不挤主区） ---------- */
+
+/* 遮罩 */
+.mv-backdrop-fixed {
+  position: fixed;
+  inset: 0;
+  background: rgba(46, 42, 82, .34);
+  z-index: 1400;
+  animation: mv-fade .2s ease;
+}
+@keyframes mv-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 右侧抽屉：宽 340px，独立滚动 */
+#mv-drawer {
+  position: fixed !important;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  height: 100dvh;
+  width: 340px !important;
+  max-width: 92vw;
+  z-index: 1500;
+  border-radius: 22px 0 0 22px !important;
+  background: linear-gradient(170deg, rgba(255,255,255,.97), rgba(244,242,251,.95)) !important;
+  border: 1px solid rgba(255,255,255,.9) !important;
+  border-right: none !important;
+  box-shadow: -24px 60px 60px -22px rgba(66,58,140,.45) !important;
+  padding: 18px 16px 24px !important;
+  overflow-y: auto;
+  animation: mv-slide-in .26s cubic-bezier(.22,.9,.3,1);
+}
+@keyframes mv-slide-in {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+#mv-drawer .mv-drawer-title {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--mv-ink);
+  align-self: center;
+  white-space: nowrap;
+}
+#mv-drawer .block-label,
+#mv-drawer [data-testid="block-info"] {
+  color: #7A74A8 !important;
+  font-weight: 700 !important;
+}
+#mv-filter {
+  border-radius: 12px !important;
+  border-color: rgba(140,132,200,.24) !important;
+  background: rgba(255,255,255,.9) !important;
+}
+
+/* 只读历史查看器：居中弹层 */
+#mv-viewer {
+  position: fixed !important;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(880px, 92vw) !important;
+  max-height: 88vh;
+  z-index: 1600;
+  border-radius: 22px !important;
+  background: linear-gradient(170deg, rgba(255,255,255,.98), rgba(248,246,254,.96)) !important;
+  border: 1px solid rgba(255,255,255,.92) !important;
+  box-shadow: 0 30px 70px -24px rgba(66,58,140,.6) !important;
+  padding: 20px !important;
+  animation: mv-pop .2s ease;
+}
+#mv-viewer-backdrop .mv-backdrop-fixed { z-index: 1550; }
+@keyframes mv-pop {
+  from { opacity: 0; transform: translate(-50%, -46%) scale(.97); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+#mv-viewer-chat {
+  border-radius: 18px !important;
+  border: 1px solid rgba(140,132,200,.18) !important;
+  background: rgba(255,255,255,.75) !important;
+}
+
+/* 收藏卡片（HTML 卡片带内联样式，需 !important 覆盖） */
+.saved-card {
+  cursor: pointer;
+  background: rgba(255,255,255,.82) !important;
+  border: 1px solid rgba(140,132,200,.18) !important;
+  border-radius: 14px !important;
+  padding: 11px 13px !important;
+  margin-bottom: 8px !important;
+  box-shadow: 0 8px 18px -14px rgba(66,58,140,.6) !important;
+  transition: transform .15s ease, box-shadow .15s ease, background .15s ease !important;
+}
+.saved-card:hover {
+  background: rgba(240,238,252,.92) !important;
+  transform: translateX(-2px);
+  box-shadow: 0 12px 22px -14px rgba(66,58,140,.7) !important;
+}
+
+/* 事件桥 Textbox：保持挂载但视觉移出屏幕（Gradio 6 不渲染 visible=False 组件） */
+.mv-bridge-box {
+  position: absolute !important;
+  left: -9999px !important;
+  top: 0 !important;
+  width: 2px !important;
+  height: 2px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* 卡片上的删除 ✕ */
+.saved-del {
+  cursor: pointer;
+  color: #B0A8E4;
+  font-size: 13px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 8px;
+  transition: all .15s ease;
+}
+.saved-del:hover {
+  background: rgba(239,68,68,.12);
+  color: #EF4444;
+}
+
+/* 状态条 / 进度条（出题进度、执行框架健康度） */
+#mv-progress > div,
+#mv-status > div {
+  padding: 9px 15px !important;
+  border-radius: 12px !important;
+  background: linear-gradient(135deg, rgba(255,255,255,.85), rgba(240,238,252,.75)) !important;
+  border: 1px solid rgba(140,132,200,.18) !important;
+  font-size: 13px !important;
+  color: var(--mv-ink2) !important;
+}
+
+/* ---------- 7. 底部信息条 ---------- */
+#mv-foot-wrap { margin-top: 18px; }
+.mv-foot { display: flex; flex-direction: column; gap: 14px; }
+.mv-foot-title {
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 2.2px;
+  color: #7A74A8;
+  text-transform: uppercase;
+  margin-bottom: 9px;
+}
+.mv-foot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(228px, 1fr));
+  gap: 12px;
+}
+.mv-foot-card {
+  position: relative;
+  overflow: hidden;
+  padding: 13px 16px 14px 18px;
+  border-radius: 16px;
+  background: linear-gradient(140deg, rgba(255,255,255,.88), rgba(255,255,255,.58));
+  border: 1px solid rgba(255,255,255,.88);
+  box-shadow: 0 12px 26px -20px rgba(66,58,140,.5);
+}
+.mv-foot-card::before {
+  content: "";
+  position: absolute;
+  left: 0; top: 12px; bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, var(--fc1, #8B7FC7), var(--fc2, #A9A3D6));
+}
+.mv-foot-card .mv-fk {
+  font-size: 12.4px;
+  font-weight: 700;
+  color: var(--mv-ink);
+  margin-bottom: 4px;
+}
+.mv-foot-card .mv-fv {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--mv-ink2);
+}
+.mv-foot-card.m1 { --fc1: #7B6FD0; --fc2: #9B8FE0; }
+.mv-foot-card.m2 { --fc1: #5F93B5; --fc2: #8FB3AE; }
+.mv-foot-card.m3 { --fc1: #A97FC2; --fc2: #C79AB4; }
+.mv-foot-card.m4 { --fc1: #C08A6E; --fc2: #C88E9E; }
+.mv-foot-card.e1 { --fc1: #6C63C7; --fc2: #8FA6D8; }
+.mv-foot-card.e2 { --fc1: #93B3AA; --fc2: #A9A3D6; }
+.mv-foot-card.e3 { --fc1: #A97FC2; --fc2: #8B7FC7; }
+.mv-foot-card.e4 { --fc1: #8FA6D8; --fc2: #6C63C7; }
+
+/* ---------- 8. 响应式 ---------- */
+@media (max-width: 900px) {
+  #mv-banner .mv-chips { margin-left: 0; }
+  #mv-tabs .tab-container:not(.visually-hidden) button { flex: 1 1 100%; }
+  [id^="mv-chat-"] .message-item { max-width: 96% !important; }
+}
