@@ -1,0 +1,29 @@
+# === 密钥 ===
+config.yaml
+config.local.yaml
+
+# === SQLite 本地库（敏感数据 + 二进制） ===
+*.db
+*.db-shm
+*.db-wal
+faiss_index.bin
+cases/case_mapping.json
+
+# === Python ===
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# === Gradio ===
+.gradio/
+
+# === 系统 ===
+.DS_Store
+Thumbs.db
+
+# === 临时测试脚本 ===
+_*.py
