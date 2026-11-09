@@ -1,93 +1,175 @@
-# data-ask-assistant
+# 测试陪练 Agent（data-ask-assistant）
 
+面向嵌入式 IPC（网络摄像头）测试同学的本地 AI 陪练工具。基于 Gradio + LLM + SQLite FTS5 用例检索，帮助测试人员**训练问题定位能力**、**速查用例**、**出题自测**，并可通过外部执行框架**真机执行用例并比对结果**。
 
+## 核心功能
 
-## Getting started
+### 四种模式（页面顶部 Radio 切换）
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+| 模式 | 说明 | 提示词 |
+|---|---|---|
+| **陪练模式**（默认） | 六步定位法引导式陪练：澄清现象 → 确认可复现 → 缩小范围 → 提出假设 → 设计验证 → 复盘归档。每轮只推进一步，不直接给答案；答错给提示再想一次，连续两次错降级为讲解 | `prompts/practice.md` |
+| **速查模式** | 直接给结论 + 操作步骤 + 关联用例 | `prompts/quickref.md` |
+| **出题模式** | 基于用例库出测试题，作答后按覆盖度/深度/边界/可执行性/原创性五维评分 | `prompts/quiz.md` |
+| **执行模式** | 调用 ipc-panel-case-builder 框架真机执行用例：白名单检查 → 确认门 → 执行 → 结果比对 → 不一致自动转陪练分析 | `prompts/execute.md` |
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+### 用例库动态检索（BM25 双路召回）
 
-## Add your files
+- 9000+ 条真实 IPC 测试用例（`cases/cases_clean.json` 导入 SQLite FTS5）
+- 三路召回 + 加权重排：FTS5 BM25（×1.0）+ 目录 LIKE 匹配（×1.5）+ 优先级加分（×0.3）
+- jieba 中文分词 + 26 条 IPC 领域同义词扩展（如 ota→升级/固件升级/firmware，sdcard→sd卡/tf卡/内存卡）
+- TopK 结果 Lazy 截断注入系统提示词，控制 token 预算
+- 向量召回层已实现但默认关闭（实测 BM25 纯检索 99ms，质量更优）
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+### 成长档案（SQLite）
+
+每轮对话自动埋点入库（`db/agent.db`）：
+
+- `sessions` / `messages`：模式、token 用量、延迟、引用用例 ID、回复类型（引导反问/直接作答/评分反馈）
+- `quiz_answers`：出题模式五维评分明细
+- `week_stats` VIEW：按周统计用例引用率、陪练反问占比、速查占比、平均延迟、token 消耗
+
+## 项目结构
 
 ```
-cd existing_repo
-git remote add origin https://registry.code.tuya-inc.top/mike.xu/data-ask-assistant.git
-git branch -M master
-git push -uf origin master
+├── app.py                  # Gradio 入口（页面 + 会话生命周期）
+├── chat_handler.py         # 业务主循环：模式匹配 → 检索注入 → LLM 调用 → 归档
+├── llm.py                  # LLM 封装（OpenAI SDK 兼容接口）
+├── config.py               # 配置加载器
+├── config.yaml             # 本地配置（含密钥，不进 git）
+├── requirements.txt
+├── prompts/                # 四模式系统提示词
+├── retrieval/              # 用例检索链路
+│   ├── db.py               #   建表 + 同义词表 + 模块索引
+│   ├── tokenizer.py        #   jieba 分词 + 同义词扩展 + FTS 查询构建
+│   ├── retriever.py        #   三路召回 + 加权重排
+│   ├── injector.py         #   目录路由裁剪 + token 预算注入
+│   └── vector.py           #   向量召回（已关闭）
+├── db/                     # 成长档案
+│   ├── schema.sql          #   sessions / messages / quiz_answers / week_stats
+│   └── db.py               #   连接 + 写入 + 周统计查询
+├── tools/                  # 执行框架适配层
+│   ├── registry.py         #   单例注册：adapter 切换 + 白名单 + 确认门 + case_mapping
+│   ├── cli_adapter.py      #   IPCPanelCheckAnchors（离线门禁）+ IPCPanelRunCase（真机）
+│   ├── base.py             #   ToolBase 抽象 + compare() 统一比对
+│   └── tool_types.py       #   ToolResult / ExpectedPlan / CompareResult
+└── cases/                  # 用例数据
+    ├── cases_clean.json    #   清洗后的 9000+ 条用例
+    ├── cases_index.md      #   用例库目录索引
+    └── clean_cases.py / integrate_cases.py   # 数据清洗与导入脚本
 ```
 
-## Integrate with your tools
+## 环境要求
 
-- [ ] [Set up project integrations](https://registry.code.tuya-inc.top/mike.xu/data-ask-assistant/-/settings/integrations)
+- Python 3.10+（开发验证于 3.13）
+- Windows / macOS / Linux
+- 可访问的公司内网 LLM 网关（OpenAI 兼容接口）
 
-## Collaborate with your team
+## 配置步骤
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+### 1. 安装依赖
 
-## Test and Deploy
+```bash
+pip install -r requirements.txt
+```
 
-Use the built-in continuous integration in GitLab.
+> 依赖：`gradio` `openai` `pyyaml` `jieba`
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+### 2. 创建 config.yaml（不进 git）
 
-***
+在项目根目录新建 `config.yaml`，参考模板：
 
-# Editing this README
+```yaml
+llm:
+  base_url: "https://<your-llm-gateway>/v1"
+  api_key: "<你的 API Key>"
+  model: "deepseek-v4.1-flash"
+  timeout: 60
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+retrieval:
+  db_path: "cases/cases.db"
+  topk_fts: 30
+  topk_catalog: 15
+  topk_final: 10
+  step_cutoff: 50
+  weights:
+    bm25: 1.0
+    catalog: 1.5
+    priority: 0.3
+  priority_score:
+    P0: 3
+    P1: 2
+    P2: 1
+  min_score: 0.1
 
-## Suggestions for a good README
+# 执行模式可选：ipc-panel-case-builder 框架目录
+tool:
+  skill_root: "D:/path/to/autotest-ipc-smoke-build"
+  check_anchors_timeout: 60000
+  run_case_timeout: 600000
+  whitelist:
+    allowed_case_ids: []
+    forbidden_priorities: ["P0"]   # P0 用例禁止自动执行
+```
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+### 3. 初始化用例库（首次运行自动完成）
 
-## Name
-Choose a self-explaining name for your project.
+```bash
+python cases/integrate_cases.py    # 导入 cases_clean.json → cases/cases.db（FTS 索引）
+```
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+或直接启动应用，`retrieval.db.init_db()` 会自动建表并装载同义词表。
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+### 4. 启动
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+```bash
+python app.py
+```
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+浏览器自动打开 `http://127.0.0.1:7860`，选择模式后即可对话。
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## 使用样例
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+### 陪练模式（默认）
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```
+你：IPC 升级固件后偶尔连不上 WiFi，大概十分之一的概率
+Agent：先补齐现场信息——固件版本号从哪升到哪？
+      路由器型号和信道？掉线时设备指示灯状态？（只反问，不分析）
+...逐轮推进六步定位法，结论留给你自己说出
+```
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+### 速查模式
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```
+你：速查 SD卡录像回看的用例
+Agent：结论 + 关键检查点 + 关联用例 1536949、1537012 ...
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### 出题模式
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```
+你：出题：OTA升级
+Agent：给出场景题 → 你作答 → 五维评分（覆盖度/深度/边界/可执行性/原创性）+ 差距点评
+```
 
-## License
-For open source projects, say how it is licensed.
+### 执行模式（需配置 skill_root + 真机）
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```
+你：执行 1536949
+Agent：[确认门] 预期 PASS，关键断言 xxx，确认执行？
+你：确认执行
+Agent：## 执行报告 · 用例 1536949
+      ✅ 预期 PASS → 实际 PASS  ⏱️ 耗时 42130ms
+      （不一致时自动转陪练：以真实执行数据为素材开始六步定位）
+
+你：跑门禁体检
+Agent：## 离线门禁体检报告  ✅ 硬错误：PASS
+```
+
+## 注意事项
+
+- **敏感文件不入库**：`config.yaml`（API Key）、`*.db`（用例库/成长档案）、`cases/case_mapping.json` 已在 `.gitignore` 排除，克隆后需自行创建
+- **case_mapping 人工确认**：TMS 数字用例 ID 与 skill 的 `cases/*.json` 映射必须人工确认后才生效，Agent 只生成草稿
+- **P0 用例保护**：白名单默认禁止 P0 用例自动执行
+- **OpenBLAS 内存报错**：jieba→numpy 在低内存机器偶发 `Memory allocation failed`，设置环境变量 `OPENBLAS_NUM_THREADS=1` 可缓解
