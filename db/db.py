@@ -120,15 +120,54 @@ def week_stats(week_start: str | None = None):
 
 # ---------- saved_sessions：会话收藏 ----------
 
+def content_to_text(content) -> str:
+    """把 Chatbot 消息内容统一成纯文本。
+
+    Gradio 6 起 Chatbot 的 content 不再是纯字符串，而可能是多模态内容块列表，
+    形如 [{"type": "text", "text": "..."}]；老格式是 str 或 (role, content) 元组。
+    这里做一次归一，避免下游 .strip() 直接炸。
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        val = content.get("text") or content.get("content") or content.get("value")
+        return val if isinstance(val, str) else json.dumps(content, ensure_ascii=False)
+    if isinstance(content, (list, tuple)):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                val = item.get("text") or item.get("content") or item.get("value")
+                if isinstance(val, str) and val:
+                    parts.append(val)
+        return "\n".join(parts)
+    return str(content)
+
+
+def normalize_message(m) -> dict | None:
+    """把 Chatbot 的各种消息形态统一成 {"role": str, "content": str}。"""
+    if isinstance(m, dict):
+        role = m.get("role", "")
+        content = content_to_text(m.get("content"))
+    elif isinstance(m, (list, tuple)) and len(m) == 2:
+        role, content = m[0], content_to_text(m[1])
+    else:
+        return None
+    if role not in ("user", "assistant"):
+        return None
+    return {"role": role, "content": content}
+
+
 def save_session(mode: str, messages: list[dict]) -> int | None:
     """把一段对话存下来。messages 是 Chatbot history 列表，每项 {role, content}。"""
-    # 过滤成纯 dict 格式（Chatbot 可能是 tuple 或 dict）
     clean: list[dict] = []
     for m in messages or []:
-        if isinstance(m, dict):
-            clean.append({"role": m.get("role", ""), "content": m.get("content", "")})
-        elif isinstance(m, (list, tuple)) and len(m) == 2:
-            clean.append({"role": m[0], "content": m[1]})
+        norm = normalize_message(m)
+        if norm is not None:
+            clean.append(norm)
 
     if not clean:
         return None
@@ -137,7 +176,7 @@ def save_session(mode: str, messages: list[dict]) -> int | None:
     title = "（空对话）"
     for m in clean:
         if m.get("role") == "user":
-            title = (m.get("content") or "").strip()[:20] or "（空对话）"
+            title = (m.get("content") or "").strip().replace("\n", " ")[:20] or "（空对话）"
             break
 
     with get_conn() as conn:

@@ -440,17 +440,6 @@ button.sm.secondary:nth-of-type(2):not(#mv-sidebar-btn) {
   box-shadow: 0 12px 22px -14px rgba(66,58,140,.7) !important;
 }
 
-/* 事件桥 Textbox：保持挂载但视觉移出屏幕（Gradio 6 不渲染 visible=False 组件） */
-.mv-bridge-box {
-  position: absolute !important;
-  left: -9999px !important;
-  top: 0 !important;
-  width: 2px !important;
-  height: 2px !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-}
-
 /* 卡片上的删除 ✕ */
 .saved-del {
   cursor: pointer;

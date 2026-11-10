@@ -46,32 +46,27 @@ MODE_CONFIG = {
     },
 }
 
-# 前端 JS：HTML 卡片没有后端事件，用隐藏 Textbox 做桥（点击卡片/删除 → 写值 → 触发 change）
-_BRIDGE_JS = """
-<script>
-function mvFire(elemId, val) {
-    var wrap = document.getElementById(elemId);
-    if (!wrap) return;
-    var ta = wrap.querySelector('textarea');
-    if (!ta) return;
-    var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
-    setter.call(ta, val);
-    ta.dispatchEvent(new Event('input', {bubbles: true}));
-    ta.dispatchEvent(new Event('change', {bubbles: true}));
-}
-document.addEventListener('click', function (e) {
+# 卡片点击脚本：走 Gradio 6 官方 gr.HTML(js_on_load=...) 机制。
+# trigger('click', {...}) 的 payload 会以属性形式注入到后端 gr.EventData（evt.action / evt.saved_id），
+# 不再依赖把 <script> 注入 <head>（那种方式经 innerHTML 插入不会执行）或隐藏 Textbox 做桥。
+_CARDS_JS = """
+element.addEventListener('click', function (e) {
     var del = e.target.closest('.saved-del');
     if (del) {
         e.stopPropagation();
-        mvFire('mv-del-box', del.getAttribute('data-del-id'));
+        trigger('click', {action: 'delete', saved_id: del.getAttribute('data-del-id') || ''});
         return;
     }
     var card = e.target.closest('.saved-card');
     if (card) {
-        mvFire('mv-open-box', card.getAttribute('data-saved-id'));
+        trigger('click', {action: 'open', saved_id: card.getAttribute('data-saved-id') || ''});
     }
-}, true);
-</script>
+});
+"""
+
+# 遮罩层同理：点击遮罩 = 触发自身 click 事件，由后端关闭浮层
+_BACKDROP_JS = """
+element.addEventListener('click', function () { trigger('click'); });
 """
 
 
@@ -260,17 +255,15 @@ def build_app() -> gr.Blocks:
 
         # ========== 浮层：回忆抽屉 + 只读查看器（CSS position:fixed，不占主区布局） ==========
 
-        # 抽屉遮罩（点击等于点关闭按钮）
+        # 抽屉遮罩（点击遮罩关闭抽屉）
         drawer_backdrop = gr.HTML(
-            '<div class="mv-backdrop-fixed" '
-            'onclick="document.querySelector(\'#mv-drawer-close button\').click()"></div>',
-            elem_id="mv-backdrop", visible=False,
+            '<div class="mv-backdrop-fixed"></div>',
+            elem_id="mv-backdrop", visible=False, js_on_load=_BACKDROP_JS,
         )
         # 查看器遮罩
         viewer_backdrop = gr.HTML(
-            '<div class="mv-backdrop-fixed" '
-            'onclick="document.querySelector(\'#mv-viewer-close button\').click()"></div>',
-            elem_id="mv-viewer-backdrop", visible=False,
+            '<div class="mv-backdrop-fixed"></div>',
+            elem_id="mv-viewer-backdrop", visible=False, js_on_load=_BACKDROP_JS,
         )
 
         # ---- 右侧回忆抽屉 ----
@@ -282,7 +275,8 @@ def build_app() -> gr.Blocks:
                     '点卡片回看完整对话，✕ 可删除</div>')
             filter_dd = gr.Dropdown(choices=["全部"] + MODES, value="全部", label="按模式筛选",
                                     interactive=True, elem_id="mv-filter")
-            saved_list_html = gr.HTML(_render_saved_list(), elem_id="mv-saved-list")
+            saved_list_html = gr.HTML(_render_saved_list(), elem_id="mv-saved-list",
+                                      js_on_load=_CARDS_JS)
 
         # ---- 只读历史查看器（无输入框，天然不能发消息）----
         with gr.Column(visible=False, elem_id="mv-viewer") as viewer:
@@ -293,12 +287,7 @@ def build_app() -> gr.Blocks:
                 gr.HTML('<span></span>')
                 viewer_close = gr.Button("关闭", size="sm", elem_id="mv-viewer-close", min_width=100)
 
-        # ---- HTML 卡片事件桥（Gradio 6 不挂载 visible=False 组件，
-        #      故保持可见 + CSS 移出屏幕，JS 写值触发后端 change）----
-        open_box = gr.Textbox(elem_id="mv-open-box", elem_classes=["mv-bridge-box"],
-                              show_label=False, container=False)
-        del_box = gr.Textbox(elem_id="mv-del-box", elem_classes=["mv-bridge-box"],
-                             show_label=False, container=False)
+        # ---- 浮层开合状态（卡片点击已改走 gr.HTML 的 js_on_load 事件，不再需要隐藏输入框做桥）----
         drawer_state = gr.State(False)
 
         # ========== 事件绑定 ==========
@@ -325,36 +314,47 @@ def build_app() -> gr.Blocks:
         for _btn in (save_p, save_q, save_z, save_e):
             _btn.click(lambda fv: _render_saved_list(fv), [filter_dd], saved_list_html)
 
-        def open_saved(raw: str):
-            raw = (raw or "").strip()
-            if not raw:
-                return gr.update(visible=False), gr.update(visible=False), gr.update(), gr.update(), ""
-            try:
-                data = get_saved_session(int(raw))
-            except (TypeError, ValueError):
-                data = None
-            if not data:
-                return gr.update(visible=False), gr.update(visible=False), gr.update(), gr.update(), ""
-            return (gr.update(visible=True), gr.update(visible=True),
-                    _viewer_head_html(data), data["messages"], "")
+        # 卡片点击 / 删除：payload 由 js_on_load 里的 trigger('click', {...}) 传入
+        def on_saved_action(filter_val: str, evt: gr.EventData):
+            action = (getattr(evt, "action", "") or "")
+            sid = str(getattr(evt, "saved_id", "") or "").strip()
+            noop = (gr.update(), gr.update(), gr.update(), gr.update(), gr.update())
 
-        open_box.change(open_saved, [open_box],
-                        [viewer, viewer_backdrop, viewer_head, viewer_chat, open_box])
-
-        def on_delete(raw: str, filter_val: str):
-            raw = (raw or "").strip()
-            if raw:
+            if action == "delete" and sid:
                 try:
-                    delete_saved_session(int(raw))
+                    delete_saved_session(int(sid))
                     gr.Info("已删除这条收藏")
                 except (TypeError, ValueError):
                     pass
-            return _render_saved_list(filter_val), ""
+                return (gr.update(), gr.update(), gr.update(), gr.update(),
+                        _render_saved_list(filter_val))
 
-        del_box.change(on_delete, [del_box, filter_dd], [saved_list_html, del_box])
+            if sid:
+                try:
+                    data = get_saved_session(int(sid))
+                except (TypeError, ValueError):
+                    data = None
+                if data:
+                    return (gr.update(visible=True), gr.update(visible=True),
+                            _viewer_head_html(data), data["messages"], gr.update())
+                gr.Warning("这条记录读取失败，可能已被删除")
+            return noop
 
-        viewer_close.click(lambda: (gr.update(visible=False), gr.update(visible=False)),
-                           None, [viewer, viewer_backdrop])
+        saved_list_html.click(
+            on_saved_action, [filter_dd],
+            [viewer, viewer_backdrop, viewer_head, viewer_chat, saved_list_html],
+        )
+
+        # 点遮罩关闭浮层
+        drawer_backdrop.click(close_drawer, None,
+                              [drawer, drawer_backdrop, drawer_state])
+
+        def close_viewer():
+            return gr.update(visible=False), gr.update(visible=False)
+
+        viewer_backdrop.click(close_viewer, None, [viewer, viewer_backdrop])
+
+        viewer_close.click(close_viewer, None, [viewer, viewer_backdrop])
 
     return demo
 
@@ -407,7 +407,12 @@ def _tab_save(mode: str, history: list | None):
     if not history:
         gr.Warning("还没有对话可以存")
         return
-    sid = save_session(mode, history)
+    try:
+        sid = save_session(mode, history)
+    except Exception as e:
+        # Gradio 默认不把后端异常抛到前端，这里显式提示，避免"点了没反应"
+        gr.Error(f"保存失败：{type(e).__name__}: {e}")
+        return
     if sid is None:
         gr.Warning("还没有对话可以存")
         return
@@ -424,5 +429,4 @@ if __name__ == "__main__":
         inbrowser=True,
         css=ui_theme.load_css(),
         theme=ui_theme.build_theme(),
-        head=_BRIDGE_JS,
     )
