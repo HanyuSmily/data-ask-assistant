@@ -4,6 +4,7 @@
 import os
 import re
 import sys
+import threading
 import time
 
 from config import LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, LLM_TIMEOUT
@@ -157,14 +158,21 @@ def _detect_mode(user_text: str, ui_mode: str | None) -> str:
     return DEFAULT_MODE
 
 
+# 线程本地存储：SQLite 连接禁止跨线程复用。
+# Gradio 的每个请求跑在不同工作线程上，用全局单例会触发
+# "SQLite objects created in a thread can only be used in that same thread"。
+_retrieval_local = threading.local()
+
+
 def _get_retrieval_conn():
-    """懒加载 retrieval SQLite 连接（单例）"""
-    global _retrieval_conn
-    if '_retrieval_conn' not in globals() or _retrieval_conn is None:
+    """获取当前线程专属的 retrieval 连接（每线程一个，互不共享）"""
+    conn = getattr(_retrieval_local, "conn", None)
+    if conn is None:
         from retrieval.db import get_conn
         import config as _cfg
-        _retrieval_conn = get_conn(_cfg.RETR_DB_PATH)
-    return _retrieval_conn
+        conn = get_conn(_cfg.RETR_DB_PATH)
+        _retrieval_local.conn = conn
+    return conn
 
 
 def _dynamic_case_library(user_text: str) -> str:
@@ -179,32 +187,43 @@ def _dynamic_case_library(user_text: str) -> str:
 
 # 兼容旧接口：无参数时返回模块索引（给系统提示词常驻用）
 _module_index_cache: str | None = None
+_index_lock = threading.Lock()
 
 
 def _load_cases_index() -> str:
     """加载模块索引（紧凑版，进程内缓存一次）
 
     原详细版 21 个模块占 370 token，紧凑版约 180 token。
+    首次初始化用双检锁，避免多线程同时建库。
     """
     global _module_index_cache
     if _module_index_cache is not None:
         return _module_index_cache
-    try:
-        from retrieval.db import format_module_index_compact, init_db, seed_samples
-        import config as _cfg
-        from pathlib import Path
-        db_path = Path(_cfg.RETR_DB_PATH)
-        if not db_path.exists():
-            conn = init_db(str(db_path))
-            seed_samples(conn)
-            from retrieval.db import rebuild_fts, update_module_index
-            rebuild_fts(conn)
-            update_module_index(conn)
-        conn = _get_retrieval_conn()
-        _module_index_cache = format_module_index_compact(conn)
-        return _module_index_cache
-    except Exception as e:
-        return f"(用例库加载失败: {e})"
+    with _index_lock:
+        if _module_index_cache is not None:
+            return _module_index_cache
+        try:
+            from retrieval.db import format_module_index_compact, init_db, seed_samples
+            import config as _cfg
+            from pathlib import Path
+            db_path = Path(_cfg.RETR_DB_PATH)
+            if not db_path.exists():
+                init_conn = init_db(str(db_path))
+                try:
+                    seed_samples(init_conn)
+                    from retrieval.db import rebuild_fts, update_module_index
+                    rebuild_fts(init_conn)
+                    update_module_index(init_conn)
+                    init_conn.commit()
+                finally:
+                    init_conn.close()
+            conn = _get_retrieval_conn()
+            _module_index_cache = format_module_index_compact(conn)
+            return _module_index_cache
+        except Exception as e:
+            # 不把异常文本塞进 prompt，否则 LLM 会转而讨论这个报错而不是回答用户
+            print(f"[warn] 用例库索引加载失败: {e}", file=sys.stderr)
+            return ""
 
 
 def _load_prompt(filename: str) -> str:
